@@ -15,6 +15,9 @@ connectDB();
 
 const app = express();
 
+// Trust proxy - required for Render and other reverse proxy deployments
+app.set("trust proxy", 1);
+
 // Security middleware
 app.use(
   helmet({
