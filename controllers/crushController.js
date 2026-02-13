@@ -1,6 +1,6 @@
 const User = require('../models/User');
 
-// @desc    Get all swipeable users (exclude self, already swiped)
+// @desc    Get all swipeable users (exclude self, already swiped, filtered by preference)
 // @route   GET /api/users
 // @access  Private
 const getSwipeableUsers = async (req, res) => {
@@ -18,10 +18,37 @@ const getSwipeableUsers = async (req, res) => {
       ...currentUser.swipedRight
     ];
 
-    // Find users not in exclude list
+    // Build gender filter based on current user's preference
+    // Also ensure the other user is interested in current user's gender
+    const genderFilter = [];
+
+    if (currentUser.preference === 'boy' || currentUser.preference === 'both') {
+      // Show boys who are looking for current user's gender or both
+      genderFilter.push({
+        gender: 'boy',
+        $or: [
+          { preference: currentUser.gender },
+          { preference: 'both' }
+        ]
+      });
+    }
+
+    if (currentUser.preference === 'girl' || currentUser.preference === 'both') {
+      // Show girls who are looking for current user's gender or both
+      genderFilter.push({
+        gender: 'girl',
+        $or: [
+          { preference: currentUser.gender },
+          { preference: 'both' }
+        ]
+      });
+    }
+
+    // Find users not in exclude list and matching preference criteria
     const users = await User.find({
-      _id: { $nin: excludeIds }
-    }).select('_id name image');
+      _id: { $nin: excludeIds },
+      $or: genderFilter
+    }).select('_id name image gender');
 
     res.json(users);
   } catch (error) {
@@ -59,35 +86,44 @@ const swipe = async (req, res) => {
 
     // Check if already swiped
     const alreadySwiped =
-      currentUser.swipedLeft.includes(targetUserId) ||
-      currentUser.swipedRight.includes(targetUserId);
+      currentUser.swipedLeft.some(id => id.equals(targetUserId)) ||
+      currentUser.swipedRight.some(id => id.equals(targetUserId));
 
     if (alreadySwiped) {
       return res.status(400).json({ message: 'Already swiped on this user' });
     }
 
     if (direction === 'left') {
-      // Swipe left - not interested
-      currentUser.swipedLeft.push(targetUserId);
-      await currentUser.save();
+      // Swipe left - not interested (use updateOne to avoid full validation)
+      await User.updateOne(
+        { _id: currentUser._id },
+        { $push: { swipedLeft: targetUserId } }
+      );
 
       return res.json({ matched: false });
     }
 
     // Swipe right - interested
-    currentUser.swipedRight.push(targetUserId);
-
     // Check if target user has already swiped right on current user
-    const isMatch = targetUser.swipedRight.includes(currentUser._id);
+    const isMatch = targetUser.swipedRight.some(id => id.equals(currentUser._id));
 
     if (isMatch) {
-      // It's a match! Add each other to matches array
-      currentUser.matches.push(targetUserId);
-      targetUser.matches.push(currentUser._id);
-      await targetUser.save();
+      // It's a match! Add each other to matches array (use updateOne to avoid full validation)
+      await User.updateOne(
+        { _id: currentUser._id },
+        { $push: { swipedRight: targetUserId, matches: targetUserId } }
+      );
+      await User.updateOne(
+        { _id: targetUser._id },
+        { $push: { matches: currentUser._id } }
+      );
+    } else {
+      // Just add to swipedRight
+      await User.updateOne(
+        { _id: currentUser._id },
+        { $push: { swipedRight: targetUserId } }
+      );
     }
-
-    await currentUser.save();
 
     res.json({
       matched: isMatch,
