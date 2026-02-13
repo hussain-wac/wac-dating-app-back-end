@@ -117,6 +117,36 @@ const swipe = async (req, res) => {
         { _id: targetUser._id },
         { $push: { matches: currentUser._id } }
       );
+
+      // Emit socket events to both users about the match
+      const io = req.app.get('io');
+      const userSockets = req.app.get('userSockets');
+
+      if (io && userSockets) {
+        // Notify current user
+        const currentUserSocketId = userSockets.get(currentUser._id.toString());
+        if (currentUserSocketId) {
+          io.to(currentUserSocketId).emit('match', {
+            matchedUser: {
+              _id: targetUser._id,
+              name: targetUser.name,
+              image: targetUser.image
+            }
+          });
+        }
+
+        // Notify target user
+        const targetUserSocketId = userSockets.get(targetUser._id.toString());
+        if (targetUserSocketId) {
+          io.to(targetUserSocketId).emit('match', {
+            matchedUser: {
+              _id: currentUser._id,
+              name: currentUser.name,
+              image: currentUser.image
+            }
+          });
+        }
+      }
     } else {
       // Just add to swipedRight
       await User.updateOne(

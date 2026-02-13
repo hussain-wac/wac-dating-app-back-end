@@ -3,6 +3,8 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const path = require("path");
+const http = require("http");
+const { Server } = require("socket.io");
 require("dotenv").config();
 
 const connectDB = require("./config/db");
@@ -14,6 +16,45 @@ const matchRoutes = require("./routes/matchRoutes");
 connectDB();
 
 const app = express();
+const server = http.createServer(app);
+
+// Socket.IO setup
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+// Store io instance for use in controllers
+app.set("io", io);
+
+// Socket.IO connection handling
+const userSockets = new Map(); // Map userId to socketId
+
+io.on("connection", (socket) => {
+  console.log("User connected:", socket.id);
+
+  // User joins with their userId
+  socket.on("join", (userId) => {
+    if (userId) {
+      userSockets.set(userId, socket.id);
+      socket.userId = userId;
+      console.log(`User ${userId} joined with socket ${socket.id}`);
+    }
+  });
+
+  // Handle disconnect
+  socket.on("disconnect", () => {
+    if (socket.userId) {
+      userSockets.delete(socket.userId);
+      console.log(`User ${socket.userId} disconnected`);
+    }
+  });
+});
+
+// Store userSockets map for use in controllers
+app.set("userSockets", userSockets);
 
 // Trust proxy - required for Render and other reverse proxy deployments
 app.set("trust proxy", 1);
@@ -85,6 +126,6 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
